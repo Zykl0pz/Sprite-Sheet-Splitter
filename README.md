@@ -1,6 +1,6 @@
 # 🎮 SpriteSheet Splitter Tools
 
-Herramientas profesionales para dividir spritesheets en frames individuales, diseñadas específicamente para desarrolladores de videojuegos con libGDX.
+Herramientas de CLI básicas para dividir spritesheets en frames individuales, diseñadas específicamente para desarrolladores de videojuegos con libGDX.
 
 ## ✨ Características
 
