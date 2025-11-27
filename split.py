@@ -2,6 +2,7 @@ import os
 from PIL import Image
 import argparse
 import glob
+import re
 
 def get_image_files_in_current_dir():
     """Obtiene todos los archivos de imagen en el directorio actual"""
@@ -13,6 +14,94 @@ def get_image_files_in_current_dir():
         image_files.extend(glob.glob(extension.upper()))
     
     return sorted(image_files)
+
+def find_image_subdirectories(base_dir):
+    """
+    Busca en los subdirectorios del primer nivel que contengan archivos de imagen
+    Retorna una lista de subdirectorios que contienen imágenes
+    """
+    image_subdirs = []
+    
+    try:
+        # Obtener todos los elementos en el directorio base
+        for item in os.listdir(base_dir):
+            item_path = os.path.join(base_dir, item)
+            
+            # Verificar si es un directorio
+            if os.path.isdir(item_path):
+                # Buscar archivos de imagen en este subdirectorio
+                image_extensions = ['*.png', '*.jpg', '*.jpeg', '*.bmp', '*.gif', '*.tga']
+                has_images = False
+                
+                for extension in image_extensions:
+                    # Buscar con extensión normal y en mayúsculas
+                    if (glob.glob(os.path.join(item_path, extension)) or 
+                        glob.glob(os.path.join(item_path, extension.upper()))):
+                        has_images = True
+                        break
+                
+                if has_images:
+                    image_subdirs.append(item_path)
+    
+    except PermissionError:
+        print(f"❌ No se pudo acceder a un directorio por falta de permisos")
+    except Exception as e:
+        print(f"❌ Error al escanear subdirectorios: {e}")
+    
+    return sorted(image_subdirs)
+
+def clean_filename(name):
+    """
+    Limpia un nombre para que sea válido como nombre de archivo/carpeta
+    Elimina caracteres especiales y reemplaza espacios
+    """
+    # Caracteres no permitidos en nombres de archivo/carpeta
+    invalid_chars = '<>:"/\\|?*'
+    for char in invalid_chars:
+        name = name.replace(char, '_')
+    
+    # Reemplazar múltiples espacios por un solo guión bajo
+    name = re.sub(r'\s+', '_', name.strip())
+    
+    # Asegurar que no esté vacío después de limpiar
+    if not name:
+        name = "unnamed"
+    
+    return name
+
+def get_custom_names(count, item_type):
+    """
+    Solicita nombres personalizados al usuario para filas o columnas
+    """
+    names = []
+    print(f"\n🏷️  Asignando nombres para {count} {item_type}:")
+    print("   (Presiona Enter para usar nombre por defecto)")
+    
+    for i in range(count):
+        while True:
+            default_name = f"{item_type[:-1]}_{i}"  # row_0, col_1, etc.
+            custom_name = input(f"   {item_type[:-1].capitalize()} {i}: ").strip()
+            
+            if not custom_name:
+                # Usar nombre por defecto si no se ingresa nada
+                names.append(default_name)
+                print(f"     ✅ Usando: {default_name}")
+                break
+            else:
+                # Limpiar el nombre personalizado
+                cleaned_name = clean_filename(custom_name)
+                if cleaned_name != custom_name:
+                    print(f"     ✅ Nombre limpio: {cleaned_name}")
+                
+                # Verificar si el nombre ya fue usado
+                if cleaned_name in names:
+                    print(f"     ❌ Este nombre ya fue usado. Elige otro.")
+                    continue
+                
+                names.append(cleaned_name)
+                break
+    
+    return names
 
 def select_file_from_current_dir():
     """Permite al usuario seleccionar un archivo de imagen del directorio actual"""
@@ -52,6 +141,49 @@ def select_file_from_current_dir():
         except ValueError:
             print("❌ Por favor ingresa un número válido.")
 
+def select_from_subdirectories(base_dir):
+    """
+    Permite al usuario seleccionar entre subdirectorios que contienen imágenes
+    Retorna el directorio seleccionado o None si no hay subdirectorios con imágenes
+    """
+    print("\n🔍 Escaneando subdirectorios en busca de spritesheets...")
+    image_subdirs = find_image_subdirectories(base_dir)
+    
+    if not image_subdirs:
+        print("❌ No se encontraron subdirectorios con archivos de imagen.")
+        return None
+    
+    print("\n📂 Subdirectorios que contienen spritesheets:")
+    print("   (Se encontraron imágenes en las siguientes carpetas)")
+    
+    for i, subdir in enumerate(image_subdirs, 1):
+        # Mostrar solo el nombre de la carpeta, no la ruta completa
+        dir_name = os.path.basename(subdir)
+        print(f"   {i}. {dir_name}/")
+    
+    print(f"   {len(image_subdirs) + 1}. 🔙 Volver al directorio anterior")
+    
+    while True:
+        try:
+            choice = input(f"\n🔢 Selecciona un subdirectorio (1-{len(image_subdirs) + 1}): ").strip()
+            
+            if choice.isdigit():
+                index = int(choice) - 1
+                if 0 <= index < len(image_subdirs):
+                    selected_dir = image_subdirs[index]
+                    print(f"✅ Directorio seleccionado: {os.path.basename(selected_dir)}/")
+                    return selected_dir
+                elif index == len(image_subdirs):
+                    print("↩️ Volviendo al directorio anterior...")
+                    return None
+                else:
+                    print(f"❌ Por favor selecciona un número entre 1 y {len(image_subdirs) + 1}")
+            else:
+                print("❌ Por favor ingresa un número válido.")
+                
+        except ValueError:
+            print("❌ Por favor ingresa un número válido.")
+
 def get_user_input():
     """Obtiene toda la información necesaria del usuario de forma interactiva"""
     print("🎮 SpriteSheet Splitter - Modo Interactivo")
@@ -63,21 +195,98 @@ def get_user_input():
     print("   - O ingresa la ruta completa del archivo")
     
     while True:
-        input_file = input("👉 ").strip()
+        input_path = input("👉 ").strip()
         
-        if input_file.lower() in ['this', 'este', 'actual', 'current']:
-            selected_file = select_file_from_current_dir()
-            if selected_file:
-                input_file = selected_file
+        if input_path.lower() in ['this', 'este', 'actual', 'current']:
+            # Primero verificar si hay archivos de imagen en el directorio actual
+            image_files = get_image_files_in_current_dir()
+            
+            if not image_files:
+                # Si no hay imágenes en el directorio actual, buscar en subdirectorios
+                current_dir = os.getcwd()
+                selected_subdir = select_from_subdirectories(current_dir)
+                
+                if selected_subdir:
+                    # Cambiar al subdirectorio seleccionado
+                    os.chdir(selected_subdir)
+                    print(f"📂 Cambiado al directorio: {os.getcwd()}")
+                    # Ahora seleccionar archivo en el nuevo directorio
+                    selected_file = select_file_from_current_dir()
+                    if selected_file:
+                        input_path = selected_file
+                        break
+                    else:
+                        continue
+                else:
+                    # El usuario eligió volver o no hay subdirectorios
+                    print("❌ No se encontraron archivos de imagen. Intenta nuevamente.")
+                    continue
+            else:
+                # Hay imágenes en el directorio actual
+                selected_file = select_file_from_current_dir()
+                if selected_file:
+                    input_path = selected_file
+                    break
+                else:
+                    continue
+        
+        # Verificar si la ruta ingresada es un directorio
+        if os.path.isdir(input_path):
+            # Cambiar al directorio especificado
+            original_dir = os.getcwd()
+            os.chdir(input_path)
+            current_dir = os.getcwd()
+            
+            # Verificar si hay imágenes en este directorio
+            image_files = get_image_files_in_current_dir()
+            
+            if not image_files:
+                # Si no hay imágenes, buscar en subdirectorios
+                print(f"📂 El directorio no contiene imágenes directamente.")
+                selected_subdir = select_from_subdirectories(current_dir)
+                
+                if selected_subdir:
+                    # Cambiar al subdirectorio seleccionado
+                    os.chdir(selected_subdir)
+                    print(f"📂 Cambiado al directorio: {os.getcwd()}")
+                    # Seleccionar archivo en el nuevo directorio
+                    selected_file = select_file_from_current_dir()
+                    if selected_file:
+                        input_path = selected_file
+                        break
+                    else:
+                        # Volver al directorio original si no se seleccionó archivo
+                        os.chdir(original_dir)
+                        continue
+                else:
+                    # Volver al directorio original y pedir nueva entrada
+                    os.chdir(original_dir)
+                    print("❌ No se encontraron archivos de imagen. Intenta nuevamente.")
+                    continue
+            else:
+                # Hay imágenes en el directorio, seleccionar una
+                selected_file = select_file_from_current_dir()
+                if selected_file:
+                    input_path = selected_file
+                    break
+                else:
+                    os.chdir(original_dir)
+                    continue
+        
+        # Verificar si es un archivo que existe
+        if os.path.exists(input_path) and os.path.isfile(input_path):
+            # Verificar que sea un archivo de imagen por su extensión
+            image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tga']
+            file_ext = os.path.splitext(input_path)[1].lower()
+            
+            if file_ext in image_extensions:
                 break
             else:
-                continue
-        
-        if os.path.exists(input_file):
-            break
-        print("❌ El archivo no existe. Intenta nuevamente o escribe 'this' para ver archivos del directorio actual.")
+                print("❌ El archivo seleccionado no es una imagen válida.")
+        else:
+            print("❌ La ruta no existe. Intenta nuevamente o escribe 'this' para ver archivos disponibles.")
     
-    print(f"✅ Archivo seleccionado: {input_file}")
+    print(f"✅ Archivo seleccionado: {input_path}")
     
     # Columnas y filas
     while True:
@@ -94,28 +303,48 @@ def get_user_input():
     prefix = input("\n🏷️  Prefijo para los nombres de archivo (ej: walk, idle, attack): ").strip()
     if not prefix:
         # Usar el nombre del archivo sin extensión como prefijo por defecto
-        prefix = os.path.splitext(os.path.basename(input_file))[0]
+        prefix = os.path.splitext(os.path.basename(input_path))[0]
         print(f"   Usando prefijo por defecto: {prefix}")
     
-    # Organización
+    # Organización y nombres personalizados
+    row_names = None
+    col_names = None
+    
     print("\n📂 ¿Cómo quieres organizar los frames?")
     print("   1. Todos en una sola carpeta")
     print("   2. Por columnas (cada columna en su propia carpeta)")
     print("   3. Por filas (cada fila en su propia carpeta)")
+    print("   4. Por filas y columnas (estructura bidimensional)")
     
     while True:
-        org_choice = input("👉 Selecciona (1-3): ").strip()
+        org_choice = input("👉 Selecciona (1-4): ").strip()
         if org_choice == '1':
             organize_by = None
             break
         elif org_choice == '2':
             organize_by = 'column'
+            # Solicitar nombres personalizados para columnas
+            col_names = get_custom_names(cols, "columns")
             break
         elif org_choice == '3':
             organize_by = 'row'
+            # Solicitar nombres personalizados para filas
+            row_names = get_custom_names(rows, "rows")
+            break
+        elif org_choice == '4':
+            organize_by = 'both'
+            # Solicitar nombres personalizados para filas y columnas
+            row_names = get_custom_names(rows, "rows")
+            col_names = get_custom_names(cols, "columns")
             break
         else:
-            print("❌ Selección inválida. Elige 1, 2 o 3.")
+            print("❌ Selección inválida. Elige 1, 2, 3 o 4.")
+    
+    # Mostrar vista previa de la estructura de nomenclatura
+    if organize_by in ['row', 'both'] and row_names:
+        print(f"\n📋 Nombres de filas: {', '.join(row_names)}")
+    if organize_by in ['column', 'both'] and col_names:
+        print(f"📋 Nombres de columnas: {', '.join(col_names)}")
     
     # Número inicial
     while True:
@@ -139,19 +368,21 @@ def get_user_input():
     remove_empty = keep_empty not in ['s', 'si', 'sí', 'y', 'yes']
     
     return {
-        'input_file': input_file,
+        'input_file': input_path,
         'prefix': prefix,
         'cols': cols,
         'rows': rows,
         'organize_by': organize_by,
         'start_number': start_number,
         'format': format_choice,
-        'remove_empty': remove_empty
+        'remove_empty': remove_empty,
+        'row_names': row_names,
+        'col_names': col_names
     }
 
 def split_spritesheet(input_file, prefix, cols, rows, 
                      start_number=0, format="PNG", remove_empty=True,
-                     organize_by=None):
+                     organize_by=None, row_names=None, col_names=None):
     """
     Divide un spritesheet en frames individuales en la carpeta 'sprites'
     """
@@ -194,28 +425,52 @@ def split_spritesheet(input_file, prefix, cols, rows,
                     continue
                 
                 # Determinar el directorio de salida según la organización
+                output_dir = base_output_dir
+                
                 if organize_by == 'column':
-                    output_dir = os.path.join(base_output_dir, f"col_{col}")
+                    # Organizar por columnas
+                    col_name = col_names[col] if col_names else f"col_{col}"
+                    output_dir = os.path.join(base_output_dir, col_name)
+                    
                 elif organize_by == 'row':
-                    output_dir = os.path.join(base_output_dir, f"row_{row}")
-                else:
-                    output_dir = base_output_dir
+                    # Organizar por filas
+                    row_name = row_names[row] if row_names else f"row_{row}"
+                    output_dir = os.path.join(base_output_dir, row_name)
+                    
+                elif organize_by == 'both':
+                    # Organizar bidimensionalmente: filas/columnas
+                    row_name = row_names[row] if row_names else f"row_{row}"
+                    col_name = col_names[col] if col_names else f"col_{col}"
+                    output_dir = os.path.join(base_output_dir, row_name, col_name)
                 
                 # Crear subdirectorio si es necesario
                 if organize_by and not os.path.exists(output_dir):
                     os.makedirs(output_dir)
                 
+                # Determinar el nombre del archivo
+                if organize_by == 'both':
+                    # Para organización bidimensional, incluir ambos nombres
+                    frame_number = start_number + saved_count
+                    output_file = os.path.join(output_dir, f"{prefix}_{row_names[row] if row_names else f'row_{row}'}_{col_names[col] if col_names else f'col_{col}'}_{frame_number}.{format.lower()}")
+                elif organize_by == 'row':
+                    # Para organización por filas, incluir nombre de fila
+                    frame_number = start_number + saved_count
+                    output_file = os.path.join(output_dir, f"{prefix}_{row_names[row] if row_names else f'row_{row}'}_{frame_number}.{format.lower()}")
+                elif organize_by == 'column':
+                    # Para organización por columnas, incluir nombre de columna
+                    frame_number = start_number + saved_count
+                    output_file = os.path.join(output_dir, f"{prefix}_{col_names[col] if col_names else f'col_{col}'}_{frame_number}.{format.lower()}")
+                else:
+                    # Sin organización especial
+                    frame_number = start_number + saved_count
+                    output_file = os.path.join(output_dir, f"{prefix}_{frame_number}.{format.lower()}")
+                
                 # Guardar el frame
-                frame_number = start_number + saved_count
-                output_file = os.path.join(output_dir, f"{prefix}_{frame_number}.{format.lower()}")
                 frame.save(output_file, format.upper())
                 
                 # Mostrar mensaje con la ubicación
-                if organize_by:
-                    folder_name = os.path.basename(output_dir)
-                    print(f"💾 {folder_name}/{prefix}_{frame_number}.{format.lower()}")
-                else:
-                    print(f"💾 {prefix}_{frame_number}.{format.lower()}")
+                relative_path = os.path.relpath(output_file)
+                print(f"💾 {relative_path}")
                 
                 frame_count += 1
                 saved_count += 1
@@ -226,10 +481,33 @@ def split_spritesheet(input_file, prefix, cols, rows,
         
         if organize_by:
             print(f"📂 Carpeta base: {base_output_dir}/")
+            
             if organize_by == 'column':
-                print(f"📋 Subcarpetas creadas: {cols} columnas (col_0 a col_{cols-1})")
-            else:
-                print(f"📋 Subcarpetas creadas: {rows} filas (row_0 a row_{rows-1})")
+                if col_names:
+                    print(f"📋 Subcarpetas creadas: {cols} columnas con nombres personalizados")
+                    for i, name in enumerate(col_names):
+                        print(f"      {i}: {name}")
+                else:
+                    print(f"📋 Subcarpetas creadas: {cols} columnas (col_0 a col_{cols-1})")
+                    
+            elif organize_by == 'row':
+                if row_names:
+                    print(f"📋 Subcarpetas creadas: {rows} filas con nombres personalizados")
+                    for i, name in enumerate(row_names):
+                        print(f"      {i}: {name}")
+                else:
+                    print(f"📋 Subcarpetas creadas: {rows} filas (row_0 a row_{rows-1})")
+                    
+            elif organize_by == 'both':
+                print(f"📋 Estructura bidimensional creada:")
+                if row_names:
+                    print(f"   Filas: {', '.join(row_names)}")
+                else:
+                    print(f"   Filas: {rows} (row_0 a row_{rows-1})")
+                if col_names:
+                    print(f"   Columnas: {', '.join(col_names)}")
+                else:
+                    print(f"   Columnas: {cols} (col_0 a col_{cols-1})")
         
     except Exception as e:
         print(f"❌ Error al procesar el archivo: {e}")
